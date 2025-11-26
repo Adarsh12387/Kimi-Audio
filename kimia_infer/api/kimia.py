@@ -12,7 +12,7 @@ from kimia_infer.utils.sampler import KimiASampler
 from huggingface_hub import snapshot_download
 
 class KimiAudio(object):
-    def __init__(self, model_path: str, load_detokenizer: bool = True):
+    def __init__(self, model_path: str, tokenizer_path: str ,load_detokenizer: bool = True):
         logger.info(f"Loading kimi-audio main model")
 
         if os.path.exists(model_path):
@@ -34,13 +34,13 @@ class KimiAudio(object):
         self.kimia_token_offset = model_config.kimia_token_offset
 
         self.prompt_manager = KimiAPromptManager(
-            model_path=cache_path, kimia_token_offset=self.kimia_token_offset, kimia_text_audiodelaytokens=self.kimia_text_audiodelaytokens
+            model_path=tokenizer_path, kimia_token_offset=self.kimia_token_offset, kimia_text_audiodelaytokens=self.kimia_text_audiodelaytokens
         )
 
         if load_detokenizer:
             logger.info(f"Loading detokenizer")
             # need to compile extension moudules for the first time, it may take several minutes.
-            self.detokenizer = get_audio_detokenizer(cache_path)
+            self.detokenizer = get_audio_detokenizer(tokenizer_path)
         else:
             # in this case, you're not allowed to generate audio(wav)
             self.detokenizer = None

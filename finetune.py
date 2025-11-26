@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from typing import Dict, Optional
-
+import sys
 import torch
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
@@ -18,7 +18,8 @@ from accelerate.utils import DistributedType
 from huggingface_hub import snapshot_download
 
 from finetune_codes.model import KimiAudioModel
-from finetune_codes.datasets import LazySupervisedDataset
+#from finetune_codes.datasets import LazySupervisedDataset
+from finetune_codes.datasets_new import LazySupervisedDataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="moonshotai/Kimi-Audio-7B")
+    model_name_or_path: Optional[str] = field(default="/DATA/nfsshare/Adarsh/KIMI/models/Kimi-Audio-7B")
     model_path: str = field(
         default=None, metadata={"help": "Path to the pretrained model."}
     )
@@ -159,20 +160,29 @@ def train():
 
     logger.info(f"Loading kimi-audio main model")
 
-    if os.path.exists(model_args.model_name_or_path):
-        # local path
-        cache_path = model_args.model_name_or_path
+    if os.path.exists(model_args.model_path) and os.path.isdir(model_args.model_path):
+        # Local path provided — use it directly as cache_path
+        cache_path = model_args.model_path
+        logger.info(f"Using local model path as cache_path: {cache_path}")
     else:
-        # cache everything if model_path is a model-id
-        cache_path = snapshot_download(model_args.model_name_or_path)
+        # Treat model_path as a HF hub id and download to cache
+        logger.info(f"model_path '{model_args.model_path}' not a local dir; attempting snapshot_download from HF hub")
+        cache_path = snapshot_download(model_args.model_path)
+        logger.info(f"Downloaded HF model to cache: {cache_path}")
+
 
     logger.info(f"Looking for resources in {cache_path}")
     # check if model_path exists
     if not os.path.exists(model_args.model_path):
         raise ValueError(f"Model path {model_args.model_path} does not exist")
-    model = KimiAudioModel.from_pretrained(model_args.model_path, 
-                                           device_map=None,
-                                           **model_load_kwargs)
+
+    """
+    model = KimiAudioModel.from_pretrained(model_args.model_path,device_map=None,**model_load_kwargs)
+    """
+                                           
+    #print("cache_path",cache_path)
+    #print("model_load_kwargs",model_load_kwargs)
+    model = KimiAudioModel.init_from_pretrained(cache_path, model_load_kwargs)
 
     text_tokenizer = AutoTokenizer.from_pretrained(
         cache_path, trust_remote_code=True
@@ -192,7 +202,13 @@ def train():
         **data_module
     )
 
-    trainer.train()
+    resume_from_checkpoint = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--resume_from_checkpoint":
+            resume_from_checkpoint = sys.argv[i + 1]
+
+    #print("resume_from_checkpoint in finetune",resume_from_checkpoint)
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_state()
 
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)

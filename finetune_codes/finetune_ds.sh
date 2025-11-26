@@ -1,105 +1,97 @@
 #!/bin/bash
-export CUDA_DEVICE_MAX_CONNECTIONS=1
-DIR=`pwd`
+set -euo pipefail
 
-# Guide:
-# This script supports distributed training on multi-gpu workers (as well as single-worker training).
-# Please set the options below according to the comments.
-# For multi-gpu workers training, these options should be manually set for each worker.
-# After setting the options, please run the script on each worker.
+export CUDA_HOME=/usr/local/cuda-12.4
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+# Compiler
+export CC=/usr/bin/gcc-11
+export CXX=/usr/bin/g++-11
+
+# GPU arch — for H100, use sm_90 only
+export TORCH_CUDA_ARCH_LIST="9.0"
+
+# ABI compatibility (PyTorch 2.6.0+cu124 uses ABI=1)
+export CXXFLAGS="-D_GLIBCXX_USE_CXX11_ABI=1"
+export PATH=/DATA/anaconda3/envs/nkimi/bin:$PATH
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+
+# Recommended memory fragmentation setting
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,garbage_collection_threshold:0.6,expandable_segments:True
+
+DIR=`pwd`
 
 # Number of GPUs per GPU worker
 GPUS_PER_NODE=$(python -c 'import torch; print(torch.cuda.device_count())')
 
-# Number of GPU workers, for single-worker training, please set to 1
 NNODES=${NNODES:-1}
-
-# The rank of this worker, should be in {0, ..., WORKER_CNT-1}, for single-worker training, please set to 0
 NODE_RANK=${NODE_RANK:-0}
-
-# The ip address of the rank-0 worker, for single-worker training, please set to localhost
 MASTER_ADDR=${MASTER_ADDR:-localhost}
-
-# The port for communication
 MASTER_PORT=${MASTER_PORT:-6001}
 
-MODEL="moonshotai/Kimi-Audio-7B" # Set the path if you do not want to load from huggingface directly
-
-PRETRAINED_MODEL_PATH=""
-
-# ATTENTION: specify the path to your training data, which should be a json file consisting of a list of conversations.
-# See the section for finetuning in README for more information.
+# Use local/pretrained path here (avoid specifying HF model and local path together)
+PRETRAINED_MODEL_PATH="/DATA/nfsshare/Adarsh/KIMI/models/Kimi-Audio-7B"
 DATA=""
 
 function usage() {
-    echo '
-Usage: bash finetune/finetune_ds.sh [-m MODEL_PATH] [-d DATA_PATH]
-'
+    echo 'Usage: bash finetune_ds.sh -m PRETRAINED_MODEL_PATH -d DATA_PATH'
 }
 
-while [[ "$1" != "" ]]; do
+while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -m | --model_path )
-            shift
-            PRETRAINED_MODEL_PATH=$1
-            ;;
-        -d | --data )
-            shift
-            DATA=$1
-            ;;
-        -h | --help )
-            usage
-            exit 0
-            ;;
-        * )
-            echo "Unknown argument ${1}"
-            exit 1
-            ;;
+        -m|--model_path) PRETRAINED_MODEL_PATH="$2"; shift ;;
+        -d|--data) DATA="$2"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown argument $1"; usage; exit 1 ;;
     esac
     shift
 done
 
-# check if data exists
-if [ ! -f "$DATA" ]; then
-    echo "Error: DATA file does not exist"
+if [ -z "$PRETRAINED_MODEL_PATH" ]; then
+    echo "Error: PRETRAINED_MODEL_PATH empty"
+    usage
     exit 1
 fi
 
-# check if model_path exists
+if [ -z "$DATA" ]; then
+    echo "Error: DATA empty"
+    usage
+    exit 1
+fi
+
+if [ ! -f "$DATA" ]; then
+    echo "Error: DATA file does not exist: $DATA"
+    exit 1
+fi
+
 if [ ! -d "$PRETRAINED_MODEL_PATH" ]; then
-    echo "Error: PRETRAINED_MODEL_PATH does not exist"
+    echo "Error: PRETRAINED_MODEL_PATH does not exist: $PRETRAINED_MODEL_PATH"
     exit 1
 fi
 
 echo "PRETRAINED_MODEL_PATH: $PRETRAINED_MODEL_PATH"
 echo "DATA: $DATA"
+echo "GPUS_PER_NODE: $GPUS_PER_NODE"
 
-DISTRIBUTED_ARGS="
-    --nproc_per_node $GPUS_PER_NODE \
-    --nnodes $NNODES \
-    --node_rank $NODE_RANK \
-    --master_addr $MASTER_ADDR \
-    --master_port $MASTER_PORT
-"
+DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
 
 echo "start finetune"
 echo "DISTRIBUTED_ARGS: $DISTRIBUTED_ARGS"
 
 torchrun $DISTRIBUTED_ARGS finetune.py \
-    --model_name_or_path $MODEL \
-    --model_path $PRETRAINED_MODEL_PATH \
-    --data_path $DATA \
+    --model_path "$PRETRAINED_MODEL_PATH" \
+    --data_path "$DATA" \
     --eval_ratio 0.05 \
     --bf16 True \
-    --output_dir output/kimiaudio_ckpts \
+    --output_dir /DATA/nfsshare/Adarsh/KIMI/output \
     --num_train_epochs 5 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
-    --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 1000 \
-    --save_total_limit 10 \
+    --save_steps 10000 \
+    --save_total_limit 5 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \
     --adam_beta2 0.95 \
@@ -110,4 +102,6 @@ torchrun $DISTRIBUTED_ARGS finetune.py \
     --model_max_length 512 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --deepspeed finetune_codes/ds_config_zero3.json
+    --deepspeed finetune_codes/ds_config_zero3.json \
+    --resume_from_checkpoint /DATA/nfsshare/Adarsh/KIMI/output/checkpoint-100000
+

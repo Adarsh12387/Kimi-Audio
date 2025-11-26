@@ -49,6 +49,7 @@ class LazySupervisedDataset(Dataset):
         #     int(continous_feature.shape[1] // 4),
         #     continous_feature.shape[2] * 4,
         # )
+        print(wav.shape)
         return wav
     
     def _tokenize_text(self, text):
@@ -132,6 +133,7 @@ class LazySupervisedDataset(Dataset):
             kimia_content_msg.is_valid()
         ), f"kimia_content_msg is not valid: {kimia_content_msg}"
 
+        print("kimia_content_msg",vars(kimia_content_msg))
         return kimia_content_msg
     
     def tokenize_conversation(
@@ -153,6 +155,7 @@ class LazySupervisedDataset(Dataset):
 
         previous_role = None
         for msg_idx, message in enumerate(messages):
+            print("msg_idx, message",msg_idx, message)
             assert message["role"] in ["user", "assistant"]
 
             if previous_role is None:
@@ -204,6 +207,7 @@ class LazySupervisedDataset(Dataset):
         for msg in msgs[1:]:
             ret_msg.merge(msg)
 
+        print("returning msg",vars(ret_msg))
         return ret_msg
 
     @lru_cache(maxsize=None)
@@ -237,12 +241,13 @@ class LazySupervisedDataset(Dataset):
                 text_loss_mask,
             ),
         )
+        #print("ret",ret)
 
         return ret
     
     @staticmethod
     def collate_fn(batch):
-        assert len(batch) == 1, "micro batch size is 1 for demo"
+        assert len(batch) == 1#, "micro batch size is 1 for demo"
 
         return batch[0]
         

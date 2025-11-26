@@ -30,13 +30,13 @@
     },
 
     "zero_optimization": {
-        "stage": 2,
+        "stage": 3,
         "offload_optimizer": {
             "device": "cpu",
             "pin_memory": true
         },
         "offload_param": {
-            "device": "none",
+            "device": "cpu",
             "pin_memory": true
         },
         "overlap_comm": true,
@@ -49,6 +49,7 @@
         "stage3_max_reuse_distance": 1e9,
         "stage3_gather_16bit_weights_on_model_save": true
     },
+
     "gradient_accumulation_steps": "auto",
     "gradient_clipping": "auto",
     "steps_per_print": 100,

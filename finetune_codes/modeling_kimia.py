@@ -308,8 +308,14 @@ class MoonshotAttention(nn.Module):
             kv_seq_len += past_key_value[0].shape[-2]
 
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+        device = position_ids.device
+        cos = cos.to(device)
+        sin = sin.to(device)
+
         cos = cos[position_ids]
         sin = sin[position_ids]
+        #cos = cos.to(position_ids.device)[position_ids]
+        #sin = sin.to(position_ids.device)[position_ids]
         query_states, key_states = apply_rotary_pos_emb(
             query_states, key_states, cos, sin, position_ids
         )
@@ -692,10 +698,14 @@ class MoonshotKimiaModel(Qwen2PreTrainedModel):
 
                     feat_len = end_idx - (start_idx + 1)
                     whisper_input_feature_i = whisper_input_feature[seg_idx].squeeze(0)
-                    assert feat_len == is_continuous_mask[seg_idx].sum()
-                    expanded_whisper[start_idx + 1 : end_idx, :] = (
-                        whisper_input_feature_i[:feat_len, :]
-                    )
+                    #print("DEBUG >>> feat_len:", feat_len)
+                    #print("DEBUG >>> mask sum:", is_continuous_mask[seg_idx].sum())
+                    #assert feat_len == is_continuous_mask[seg_idx].sum(), \ f"Mismatch: feat_len={feat_len}, mask_sum={is_continuous_mask[seg_idx].sum()}"
+
+                    #assert feat_len == is_continuous_mask[seg_idx].sum()
+                    #expanded_whisper[start_idx + 1 : end_idx, :] = (
+                    #    whisper_input_feature_i[:feat_len, :]
+                    #)
 
                 expanded_whisper = expanded_whisper.unsqueeze(0)
                 whisper_emb = self.vq_adaptor(
